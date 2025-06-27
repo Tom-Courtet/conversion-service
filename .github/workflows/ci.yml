@@ -22,27 +22,18 @@ jobs:
       run: npm run test:coverage
     - name: Check coverage threshold
       run: |
-        # Vérifier si le rapport de couverture existe
         if [ ! -f "./coverage/lcov.info" ]; then
-          echo "Le rapport de couverture n'a pas été généré correctement."
+          echo "Rapport de couverture manquant"
           exit 1
         fi
         
-        # Vérifier la couverture à partir du rapport lcov
-        COVERAGE=$(node -e "const fs=require('fs');const lcov=fs.readFileSync('./coverage/lcov.info', 'utf8');const lines=lcov.match(/LF:(\d+)/g);const linesCovered=lcov.match(/LH:(\d+)/g);if(!lines || !linesCovered){console.log(0);process.exit(0);}const totalLines=lines.reduce((sum,line)=>sum+parseInt(line.replace('LF:',''),10),0);const totalCovered=linesCovered.reduce((sum,line)=>sum+parseInt(line.replace('LH:',''),10),0);console.log(totalLines > 0 ? Math.round(totalCovered/totalLines*100) : 0);")
+        COVERAGE=$(grep -o 'Lines.*%' coverage/lcov-report/index.html | grep -o '[0-9.]*' | head -1 || echo "0")
+        echo "Couverture: $COVERAGE%"
         
-        # Autre approche plus simple si la première ne fonctionne pas
-        if [ -z "$COVERAGE" ]; then
-          echo "Utilisation d'une approche alternative pour calculer la couverture"
-          COVERAGE=$(grep -o 'Lines.*%' coverage/lcov-report/index.html | grep -o '[0-9.]*' | head -1 || echo "0")
-        fi
-        
-        echo "Couverture de code: $COVERAGE%"
         if (( $COVERAGE < 95 )); then
-          echo "La couverture est inférieure à 95%"
+          echo "Couverture < 95%"
           exit 1
         fi
-        echo "La couverture est supérieure au seuil requis de 95%"
 
   deploy:
     needs: test
@@ -59,7 +50,6 @@ jobs:
       run: |
         mkdir -p deploy
         cp -r src/ package.json README.md deploy/
-        # Créer un fichier package-lock.json vide si nécessaire
         touch deploy/package-lock.json
         cd deploy && zip -r ../deploy.zip .
     
@@ -69,58 +59,35 @@ jobs:
         VPS_USER: ${{ secrets.VPS_USER }}
         VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
       run: |
-        # Créer un script de déploiement
         cat > deploy.sh << 'EOL'
         #!/bin/bash
         set -e
         
-        # Installer les outils nécessaires
-        if ! command -v unzip &> /dev/null; then
-            echo "Installation de unzip..."
-            apt-get update && apt-get install -y unzip
-        fi
+        apt-get update && apt-get install -y unzip
         
-        # Définir le répertoire de l'application
         APP_DIR=/var/www/microservice-financier
         
-        # Créer le répertoire s'il n'existe pas
         mkdir -p $APP_DIR
         
-        # Nettoyer le répertoire existant (sauf node_modules et .env)
         find $APP_DIR -mindepth 1 -maxdepth 1 ! -name "node_modules" ! -name ".env" -exec rm -rf {} \;
         
-        # Décompresser les nouveaux fichiers
         unzip -o /tmp/deploy.zip -d $APP_DIR
         
-        # Installer les dépendances si nécessaire
         cd $APP_DIR
         npm install --production
         
-        # Installer PM2 si nécessaire
-        if ! command -v pm2 &> /dev/null; then
-            npm install -g pm2
-        fi
+        npm install -g pm2
         
-        # Vérifier si le service existe déjà et le redémarrer ou le démarrer
-        if pm2 list | grep -q "microservice-financier"; then
-            echo "Redémarrage du service existant..."
-            pm2 restart microservice-financier
-        else
-            echo "Démarrage d'un nouveau service..."
-            pm2 start src/server.js --name microservice-financier
-        fi
+        pm2 restart microservice-financier || pm2 start src/server.js --name microservice-financier
         
-        echo "Déploiement terminé avec succès !"
+        echo "Déploiement terminé"
         EOL
         
-        # Désactiver la vérification stricte des hôtes SSH
         export SSHPASS="$VPS_PASSWORD"
         
-        # Transférer les fichiers sur le VPS
         sshpass -e scp -o StrictHostKeyChecking=no deploy.zip $VPS_USER@$VPS_IP:/tmp/
         sshpass -e scp -o StrictHostKeyChecking=no deploy.sh $VPS_USER@$VPS_IP:/tmp/
         
-        # Exécuter le script de déploiement
         sshpass -e ssh -o StrictHostKeyChecking=no $VPS_USER@$VPS_IP "chmod +x /tmp/deploy.sh && /tmp/deploy.sh"
         
-        echo "Application déployée avec succès sur le VPS !"
+        echo "Déploiement réussi"
