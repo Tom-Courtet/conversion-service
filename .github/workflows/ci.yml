@@ -74,6 +74,12 @@ jobs:
         #!/bin/bash
         set -e
         
+        # Installer les outils nécessaires
+        if ! command -v unzip &> /dev/null; then
+            echo "Installation de unzip..."
+            apt-get update && apt-get install -y unzip
+        fi
+        
         # Définir le répertoire de l'application
         APP_DIR=/var/www/microservice-financier
         
