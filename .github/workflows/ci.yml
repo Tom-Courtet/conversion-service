@@ -1,0 +1,97 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Use Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18.x'
+    - name: Install dependencies
+      run: npm ci
+    - name: Run tests with coverage
+      run: npm run test:coverage
+    - name: Check coverage threshold
+      run: |
+        COVERAGE=$(node -e "const fs=require('fs');const coverage=JSON.parse(fs.readFileSync('./coverage/coverage-summary.json'));console.log(coverage.total.lines.pct)")
+        if (( $(echo "$COVERAGE < 100" | bc -l) )); then
+          echo "Coverage is below 100%: $COVERAGE%"
+          exit 1
+        fi
+        echo "Coverage is above threshold: $COVERAGE%"
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install sshpass
+      run: sudo apt-get install -y sshpass
+    
+    - name: Create deployment package
+      run: |
+        mkdir -p deploy
+        cp -r src/ package.json package-lock.json README.md deploy/
+        cd deploy && zip -r ../deploy.zip .
+    
+    - name: Deploy to VPS
+      env:
+        VPS_IP: ${{ secrets.VPS_IP }}
+        VPS_USER: ${{ secrets.VPS_USER }}
+        VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+      run: |
+        # Créer un script de déploiement
+        cat > deploy.sh << 'EOL'
+        #!/bin/bash
+        set -e
+        
+        # Définir le répertoire de l'application
+        APP_DIR=/var/www/microservice-financier
+        
+        # Créer le répertoire s'il n'existe pas
+        mkdir -p $APP_DIR
+        
+        # Nettoyer le répertoire existant (sauf node_modules et .env)
+        find $APP_DIR -mindepth 1 -maxdepth 1 ! -name "node_modules" ! -name ".env" -exec rm -rf {} \;
+        
+        # Décompresser les nouveaux fichiers
+        unzip -o /tmp/deploy.zip -d $APP_DIR
+        
+        # Installer les dépendances si nécessaire
+        cd $APP_DIR
+        npm install --production
+        
+        # Installer PM2 si nécessaire
+        if ! command -v pm2 &> /dev/null; then
+            npm install -g pm2
+        fi
+        
+        # Redémarrer le service
+        pm2 restart microservice-financier || pm2 start src/server.js --name microservice-financier
+        
+        echo "Déploiement terminé avec succès !"
+        EOL
+        
+        # Désactiver la vérification stricte des hôtes SSH
+        export SSHPASS="$VPS_PASSWORD"
+        
+        # Transférer les fichiers sur le VPS
+        sshpass -e scp -o StrictHostKeyChecking=no deploy.zip $VPS_USER@$VPS_IP:/tmp/
+        sshpass -e scp -o StrictHostKeyChecking=no deploy.sh $VPS_USER@$VPS_IP:/tmp/
+        
+        # Exécuter le script de déploiement
+        sshpass -e ssh -o StrictHostKeyChecking=no $VPS_USER@$VPS_IP "chmod +x /tmp/deploy.sh && /tmp/deploy.sh"
+        
+        echo "Application déployée avec succès sur le VPS !"
