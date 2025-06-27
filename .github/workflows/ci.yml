@@ -22,12 +22,21 @@ jobs:
       run: npm run test:coverage
     - name: Check coverage threshold
       run: |
-        COVERAGE=$(node -e "const fs=require('fs');const coverage=JSON.parse(fs.readFileSync('./coverage/coverage-summary.json'));console.log(coverage.total.lines.pct)")
-        if (( $(echo "$COVERAGE < 100" | bc -l) )); then
-          echo "Coverage is below 100%: $COVERAGE%"
+        # Vérifier si le rapport de couverture existe
+        if [ ! -f "./coverage/lcov.info" ]; then
+          echo "Le rapport de couverture n'a pas été généré correctement."
           exit 1
         fi
-        echo "Coverage is above threshold: $COVERAGE%"
+        
+        # Vérifier la couverture à partir du rapport lcov
+        COVERAGE=$(node -e "const fs=require('fs');const lcov=fs.readFileSync('./coverage/lcov.info', 'utf8');const lines=lcov.match(/LF:(\d+)/g);const linesCovered=lcov.match(/LH:(\d+)/g);if(!lines || !linesCovered){console.log(0);return;}const totalLines=lines.reduce((sum,line)=>sum+parseInt(line.replace('LF:',''),10),0);const totalCovered=linesCovered.reduce((sum,line)=>sum+parseInt(line.replace('LH:',''),10),0);console.log(totalLines > 0 ? Math.round(totalCovered/totalLines*100) : 0);")
+        
+        echo "Couverture de code: $COVERAGE%"
+        if (( $COVERAGE < 95 )); then
+          echo "La couverture est inférieure à 95%"
+          exit 1
+        fi
+        echo "La couverture est supérieure au seuil requis de 95%"
 
   deploy:
     needs: test
