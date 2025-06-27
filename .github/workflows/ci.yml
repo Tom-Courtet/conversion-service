@@ -58,7 +58,9 @@ jobs:
     - name: Create deployment package
       run: |
         mkdir -p deploy
-        cp -r src/ package.json package-lock.json README.md deploy/
+        cp -r src/ package.json README.md deploy/
+        # Créer un fichier package-lock.json vide si nécessaire
+        touch deploy/package-lock.json
         cd deploy && zip -r ../deploy.zip .
     
     - name: Deploy to VPS
