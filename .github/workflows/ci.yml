@@ -101,8 +101,14 @@ jobs:
             npm install -g pm2
         fi
         
-        # Redémarrer le service
-        pm2 restart microservice-financier || pm2 start src/server.js --name microservice-financier
+        # Vérifier si le service existe déjà et le redémarrer ou le démarrer
+        if pm2 list | grep -q "microservice-financier"; then
+            echo "Redémarrage du service existant..."
+            pm2 restart microservice-financier
+        else
+            echo "Démarrage d'un nouveau service..."
+            pm2 start src/server.js --name microservice-financier
+        fi
         
         echo "Déploiement terminé avec succès !"
         EOL
